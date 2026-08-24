@@ -1,0 +1,61 @@
+name: Production CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint-and-validate:
+    name: CI - Code Validation & Smoke Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install App Dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Syntax & Lint Verification
+        working-directory: app
+        run: node -c server.js
+
+  deploy-to-ec2:
+    name: CD - Deploy & Verify on AWS EC2
+    needs: lint-and-validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Execute Remote Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd ~/my-website/production-stack
+            
+            echo "==> Pulling latest changes from main branch..."
+            git pull origin main
+            
+            echo "==> Building and deploying hardened production stack..."
+            make prod-build
+            
+            echo "==> Waiting 5 seconds for healthchecks to stabilize..."
+            sleep 5
+            
+            echo "==> Running automated verification tests..."
+            make test
+            
+            echo "==> Production Deployment Successful!"
